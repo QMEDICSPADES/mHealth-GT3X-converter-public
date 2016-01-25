@@ -501,34 +501,12 @@ public class GT3XFile {
 							if(record.getType()==LogRecordType.ACTIVITY2.getId()) {
 								timestamp = (double)(record.getTimestamp()*1000);
 								byte[] curPayload = record.getPayload();
-								
-								// Each sample is 3 signed 16bit values (little endian) in XYZ order (48 bits or 6 bytes all together)
-								int sampleSize = 6;
-								byte[] payloadBuffer = new byte[sampleSize];
-								int byteCounter = 0;
-								
-								// write payload
-								for (int i = 0; i < curPayload.length; i++) {
-									payloadBuffer[byteCounter] = curPayload[i];
-									if (++byteCounter < sampleSize) continue;
-									
-									// get 16bit values
-									short[] sampleValues = parseActivity2PayloadSample(payloadBuffer);
-									
-									// apply scale factor
-									
-									// write to file
-									
-									
-									byteCounter = 0;
-								}
-								int payloadSize = 
-								
+								writeActivity2PayloadToFile(gt3xFile, curPayload, timestamp, writer);
 							}
 														
 							// Activity data: TYPE = 0
 							// Read 2 XYZ samples at a time, each sample consists of 36 bits ... 2 full samples = 9 bytes
-							if(record.getType()==LogRecordType.ACTIVITY.getId()) {								
+							if(record.getType()==LogRecordType.ACTIVITY.getId()) {	
 								int byteCounter = 0;
 								byte[] payloadBuffer = new byte[9];
 								timestamp = (double)(record.getTimestamp()*1000); // Multiply by 1000 to get milliseconds precision								
@@ -633,6 +611,35 @@ public class GT3XFile {
 		return gt3xFile;
 	}
 	
+	/**
+	 * Write Activity2 (Type=26) data to file
+	 * @param file - The GT3XFile file
+	 * @param payload - The payload corresponding to Activity2
+	 */
+	private static void writeActivity2PayloadToFile(GT3XFile file, byte[] payload, double timestamp, FileWriter writer) {
+		// Each sample is 3 signed 16bit values (little endian) in XYZ order (48 bits or 6 bytes all together)
+		int sampleSize = 6;
+		byte[] payloadBuffer = new byte[sampleSize];
+		int byteCounter = 0;
+		
+		// write payload
+		for (int i = 0; i < payload.length; i++) {
+			payloadBuffer[byteCounter] = payload[i];
+			if (++byteCounter < sampleSize) continue;
+			
+			// get 16bit values
+			short[] sampleValues = parseActivity2PayloadSample(payloadBuffer);
+			
+			// apply scale factor
+			
+			
+			// write to file
+			
+			
+			byteCounter = 0;
+		} 
+	}
+	
 	private static short[] parseActivity2PayloadSample(byte[] payload) {
 		ByteBuffer bb =  ByteBuffer.wrap(payload);
 		bb.order(ByteOrder.LITTLE_ENDIAN);
@@ -650,6 +657,28 @@ public class GT3XFile {
 		}
 		
 		return parsed;
+	}
+	
+	private static void handlemHealthSplit(GT3XFile file, FileWriter writer, double timestamp) throws IOException {
+		if(!file._SplitMHealth) return;
+		
+		file._CurrHourTimestamp = GT3XUtils.getCurrentHourTimestamp(timestamp);
+		
+		// Create a new file if hour changes...
+		if(file._PrevHourTimestamp != file._CurrHourTimestamp) {
+			if(file._PrevHourTimestamp!=0) {
+				writer.close();
+				file._MHealthFileName = GT3XUtils.getMHealthFileName(
+						file._CurrHourTimestamp, 
+						"ACCEL", 
+						file._SerialNumber, 
+						file._TimeZoneOffsetMHealth);
+				file._OutputFileName = file._OutputFileDirectory+file._MHealthFileName;
+				writer = new FileWriter(file._OutputFileName);
+				writer.append(file._WithTimestamps ? "HEADER_TIME_STAMP,X,Y,Z\n" : "X,Y,Z\n"); // Add mHealth header
+			}
+			file._PrevHourTimestamp = file._CurrHourTimestamp;
+		}
 	}
 
 	public String toString(){
