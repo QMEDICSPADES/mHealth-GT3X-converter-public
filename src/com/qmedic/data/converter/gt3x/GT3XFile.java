@@ -497,26 +497,69 @@ public class GT3XFile {
 
 						// Write the data if checksum is verified
 						if(chkSum==0x1E) {							
-							// Activity2 data: TYPE = 26. For GT9X devices.
+							// Activity2 data: TYPE = 26. (TAS)
 							if(record.getType()==LogRecordType.ACTIVITY2.getId()) {
+								
+								// Check for gaps in data and fill them out using the last known data points before those gaps occur
+								long diff = gt3xFile._LastRecordedTimeStamp == 0 ?
+										0 : 
+										(long)timestamp - gt3xFile._LastRecordedTimeStamp;
+								
+								if(diff>0) {
+									long numSamplesMissing = (long)(diff/gt3xFile._Delta);
+									double tempTimestamp = (double)gt3xFile._LastRecordedTimeStamp;
+									for(int j=0; j<numSamplesMissing; j++) {
+										if(gt3xFile._SplitMHealth) {
+											gt3xFile._CurrHourTimestamp = GT3XUtils.getCurrentHourTimestamp(tempTimestamp);
+											// Create a new file if hour changes...
+											if(gt3xFile._PrevHourTimestamp != gt3xFile._CurrHourTimestamp) {
+												if(gt3xFile._PrevHourTimestamp!=0) {
+													writer.close();
+													gt3xFile._MHealthFileName = GT3XUtils.getMHealthFileName(
+															gt3xFile._CurrHourTimestamp, 
+															"ACCEL", 
+															gt3xFile._SerialNumber, 
+															gt3xFile._TimeZoneOffsetMHealth);
+													gt3xFile._OutputFileName = gt3xFile._OutputFileDirectory+gt3xFile._MHealthFileName;
+													writer = new FileWriter(gt3xFile._OutputFileName);
+													writer.append(gt3xFile._WithTimestamps ? "HEADER_TIME_STAMP,X,Y,Z\n" : "X,Y,Z\n"); // Add mHealth header
+												}
+												gt3xFile._PrevHourTimestamp = gt3xFile._CurrHourTimestamp;
+											}
+										}
+										tempTimestamp = gt3xFile.fillDataGap(writer, tempTimestamp, gt3xFile._LastRecordedXYZ);
+									}										
+								}
 								
 								timestamp = (double)(record.getTimestamp()*1000);
 								byte[] curPayload = record.getPayload();
 								
-								// Each sample is 3 signed 16 bit values (little endian) in XYZ order
+								// Each sample consists of 3 signed 16 bit values (little endian) in XYZ order
 								int sampleSize = 6;
 								byte[] payloadBuffer = new byte[sampleSize];
 								int byteCounter = 0;
 								double delta = gt3xFile._Delta;
+								
+								short[] sampleValues = null;
+								double[] scaledValues = null;
+								String csvLine = null;
 								
 								// write payload
 								for (int index = 0; index < curPayload.length; index++) {
 									payloadBuffer[byteCounter] = curPayload[index];
 									if (++byteCounter < sampleSize) continue;
 									
-									short[] sampleValues = parseActivity2PayloadSample(payloadBuffer);
-									double[] scaledValues = applyAccelerationScaling(sampleValues, accelerationScale);
-									String csvLine = asCSVLine(timestamp, delta, scaledValues);
+									short[] newSampleValues = parseTASPayloadSample(payloadBuffer);
+									if (newSampleValues == null && sampleValues == null) {
+										continue;
+									} else if (newSampleValues != null) {
+										// do processing only went we get new values
+										sampleValues = newSampleValues;
+										scaledValues = applyAccelerationScaling(sampleValues, accelerationScale);
+										csvLine = asCSVLine(timestamp, delta, scaledValues);
+									}
+									
+									if (csvLine == null) continue;
 									
 									// write to file
 									if(gt3xFile._SplitMHealth) {
@@ -525,6 +568,7 @@ public class GT3XFile {
 										if(gt3xFile._PrevHourTimestamp != gt3xFile._CurrHourTimestamp) {
 											if(gt3xFile._PrevHourTimestamp!=0) {
 												writer.close();
+												
 												gt3xFile._MHealthFileName = GT3XUtils.getMHealthFileName(
 														gt3xFile._CurrHourTimestamp, 
 														"ACCEL", 
@@ -539,15 +583,19 @@ public class GT3XFile {
 									}
 									
 									writer.append(csvLine);
-									// update timestamp
-									timestamp = GT3XUtils.FixTimeStamp(timestamp, delta, true);
 									
-									// Print progress
-									gt3xFile._TotalBytes+=2;
-									if (gt3xFile._TotalBytes%1000==0)
-										System.out.print("\rConverting sample.... "+(gt3xFile._TotalBytes/1000)+"K");
+									// update current state
 									byteCounter = 0;
-								} 
+									payloadBuffer = new byte[sampleSize];
+									gt3xFile._LastRecordedTimeStamp = (long)timestamp;
+									gt3xFile._LastRecordedXYZ = valuesInCSVForm(scaledValues);
+									gt3xFile._TotalBytes+=2;
+									if (gt3xFile._TotalBytes%1000==0) {
+										System.out.print("\rConverting sample.... "+(gt3xFile._TotalBytes/1000)+"K");
+									}
+									
+									timestamp = GT3XUtils.FixTimeStamp(timestamp, delta, true);
+								}
 							}
 														
 							// Activity data: TYPE = 0
@@ -657,7 +705,12 @@ public class GT3XFile {
 		return gt3xFile;
 	}
 	
-	private static short[] parseActivity2PayloadSample(final byte[] payload) {
+	/**
+	 * Parse the raw TAS bytes sample to signed 16-bit values
+	 * @param payload - The payload sample
+	 * @return The signed 16-bit values represent TAS data
+	 */
+	private static short[] parseTASPayloadSample(final byte[] payload) {
 		ByteBuffer bb =  ByteBuffer.wrap(payload);
 		bb.order(ByteOrder.LITTLE_ENDIAN);
 		
@@ -670,7 +723,8 @@ public class GT3XFile {
 		}
 		
 		if (i != numValues) {
-			// something went wrong...
+			// something went wrong
+			return null;
 		}
 		
 		return parsed;
@@ -680,8 +734,7 @@ public class GT3XFile {
 	 * Apply scaling factor to payload values
 	 * @param payloadValues - The 16bit values read from file
 	 * @param accelerationScale - The scaling to apply
-	 * @param roundDecimalPlaces
-	 * @return The value
+	 * @return The values scaled with respect to the acceleration value 
 	 */
 	private static double[] applyAccelerationScaling(final short[] payloadValues, final double accelerationScale) {
 		double[] scaledValues = new double[payloadValues.length];
@@ -696,7 +749,16 @@ public class GT3XFile {
 		return scaledValues;
 	}
 	
+	/**
+	 * Converts the specified values into a mHealth-friendly CSV line
+	 * @param timestamp - The unix timestamp
+	 * @param delta - The delta to apply to the timestamp
+	 * @param values - The values to show as a csv sttring
+	 * @return The string as a csv. Null, if no values supplied.
+	 */
 	private static String asCSVLine(final double timestamp, final double delta, final double[] values) {
+		if (values.length == 0) return null;
+		
 		StringBuilder sb = new StringBuilder();
 		
 		Date preparedDate = new Date((long) GT3XUtils.FixTimeStamp(timestamp, delta, false));
@@ -705,11 +767,23 @@ public class GT3XFile {
 				.format(preparedDate);
 		sb.append(dateString + ",");
 		
+		String csvValues = valuesInCSVForm(values); 
+		sb.append(csvValues + "\n");	
+		
+		return sb.toString();
+	}
+	
+	/**
+	 * Converts the array of values to CSV form, compatible with mHealth
+	 * @param values - The values to transform
+	 * @return A csv string representing the values
+	 */
+	private static String valuesInCSVForm(final double[] values) {
+		StringBuilder sb = new StringBuilder(); 
+				
 		for (int i = 0; i < values.length; i++) {
 			sb.append(GT3XUtils.decimalFormatObject().format(values[i]));
-			if (i+1 == values.length) {
-				sb.append("\n");
-			} else {
+			if (i+1 != values.length) {
 				sb.append(",");
 			}
 		}
