@@ -544,7 +544,7 @@ public class GT3XFile {
 								double[] scaledValues = null;
 								String csvLine = null;
 								
-								// write payload
+								// process payload
 								for (int index = 0; index < curPayload.length; index++) {
 									payloadBuffer[byteCounter] = curPayload[index];
 									if (++byteCounter < sampleSize) continue;
@@ -552,16 +552,18 @@ public class GT3XFile {
 									short[] newSampleValues = parseTASPayloadSample(payloadBuffer);
 									if (newSampleValues == null && sampleValues == null) {
 										continue;
-									} else if (newSampleValues != null) {
-										// do processing only went we get new values
+									} 
+
+									// do processing when we get new values or 
+									// print the same values but with the updated timestamp
+									if (newSampleValues != null) {
 										sampleValues = newSampleValues;
 										scaledValues = applyAccelerationScaling(sampleValues, accelerationScale);
 										csvLine = asCSVLine(timestamp, delta, scaledValues);
 									}
-									
 									if (csvLine == null) continue;
 									
-									// write to file
+									// write results to file
 									if(gt3xFile._SplitMHealth) {
 										gt3xFile._CurrHourTimestamp = GT3XUtils.getCurrentHourTimestamp(timestamp);									
 										// Create a new file if hour changes...
