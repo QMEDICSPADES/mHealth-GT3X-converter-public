@@ -37,6 +37,8 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -494,13 +496,36 @@ public class GT3XFile {
 						//System.out.print("\n--- Checksum= 0x"+GT3XUtils.bytesToHex(bytes[0])+". Calculated= 0x"+GT3XUtils.byteToHex(chkSum)+"\n\n");
 
 						// Write the data if checksum is verified
-						if(chkSum==0x1E) {
-							/*
+						if(chkSum==0x1E) {							
 							// Activity2 data: TYPE = 26. For GT9X devices.
 							if(record.getType()==LogRecordType.ACTIVITY2.getId()) {
-								// TODO Add support for ACTIVITY2 LogRecord data type
+								timestamp = (double)(record.getTimestamp()*1000);
+								byte[] curPayload = record.getPayload();
+								
+								// Each sample is 3 signed 16bit values (little endian) in XYZ order (48 bits or 6 bytes all together)
+								int sampleSize = 6;
+								byte[] payloadBuffer = new byte[sampleSize];
+								int byteCounter = 0;
+								
+								// write payload
+								for (int i = 0; i < curPayload.length; i++) {
+									payloadBuffer[byteCounter] = curPayload[i];
+									if (++byteCounter < sampleSize) continue;
+									
+									// get 16bit values
+									short[] sampleValues = parseActivity2PayloadSample(payloadBuffer);
+									
+									// apply scale factor
+									
+									// write to file
+									
+									
+									byteCounter = 0;
+								}
+								int payloadSize = 
+								
 							}
-							*/
+														
 							// Activity data: TYPE = 0
 							// Read 2 XYZ samples at a time, each sample consists of 36 bits ... 2 full samples = 9 bytes
 							if(record.getType()==LogRecordType.ACTIVITY.getId()) {								
@@ -606,6 +631,25 @@ public class GT3XFile {
 		System.out.println("Done");
 
 		return gt3xFile;
+	}
+	
+	private static short[] parseActivity2PayloadSample(byte[] payload) {
+		ByteBuffer bb =  ByteBuffer.wrap(payload);
+		bb.order(ByteOrder.LITTLE_ENDIAN);
+		
+		int numValues = 3;
+		short[] parsed = new short[numValues];
+		
+		int i = 0;
+		while (bb.hasRemaining()) {
+			parsed[i++] = bb.getShort();
+		}
+		
+		if (i != numValues) {
+			// something went wrong...
+		}
+		
+		return parsed;
 	}
 
 	public String toString(){
