@@ -559,7 +559,7 @@ public class GT3XFile {
 									if (newSampleValues != null) {
 										sampleValues = newSampleValues;
 										scaledValues = applyAccelerationScaling(sampleValues, accelerationScale);
-										csvLine = asCSVLine(timestamp, delta, scaledValues);
+										csvLine = asCSVLine(timestamp, delta, scaledValues, gt3xFile._TimeZone);
 									}
 									if (csvLine == null) continue;
 									
@@ -758,15 +758,16 @@ public class GT3XFile {
 	 * @param values - The values to show as a csv sttring
 	 * @return The string as a csv. Null, if no values supplied.
 	 */
-	private static String asCSVLine(final double timestamp, final double delta, final double[] values) {
+	private static String asCSVLine(final double timestamp, final double delta, final double[] values, final String timezone) {
 		if (values.length == 0) return null;
 		
 		StringBuilder sb = new StringBuilder();
 		
 		Date preparedDate = new Date((long) GT3XUtils.FixTimeStamp(timestamp, delta, false));
-		String dateString = GT3XUtils
-				.simpleDateFormatObject(GT3XUtils.MHEALTH_TIMESTAMP_DATA_FORMAT)
-				.format(preparedDate);
+		SimpleDateFormat sdf = GT3XUtils.simpleDateFormatObject(GT3XUtils.MHEALTH_TIMESTAMP_DATA_FORMAT);
+		sdf.setTimeZone(TimeZone.getTimeZone(timezone));
+		String dateString = sdf.format(preparedDate);
+		
 		sb.append(dateString + ",");
 		
 		String csvValues = valuesInCSVForm(values); 
