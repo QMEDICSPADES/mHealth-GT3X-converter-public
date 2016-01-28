@@ -527,7 +527,6 @@ public class GT3XFile {
 												gt3xFile._PrevHourTimestamp = gt3xFile._CurrHourTimestamp;
 											}
 										}
-										tempTimestamp = gt3xFile.fillDataGap(writer, tempTimestamp, gt3xFile._LastRecordedXYZ);
 									}										
 								}
 								
